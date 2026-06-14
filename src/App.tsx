@@ -66,6 +66,16 @@ export default function App() {
     setActiveTab('email');
   };
 
+  const handleManualRecipients = (newRecipients: Recipient[]) => {
+    setRecipients(newRecipients);
+    setCsvFileName('Manual Entry');
+    setEmailFieldName('Email');
+    setNameFieldName('Name');
+    setCsvHeaders(['Email', 'Name']);
+    addLog(`✏️ ${newRecipients.length} recipients added manually`, 'info');
+    setActiveTab('email');
+  };
+
   const handleResetRecipientStatuses = () => {
     setRecipients((prev) => prev.map((r) => ({ ...r, status: 'idle', errorMessage: undefined, sentAt: undefined })));
   };
@@ -158,7 +168,7 @@ export default function App() {
           {activeTab === 'csv' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-2">
-                <CSVUploader onDataParsed={handleCSVDataParsed} currentFileName={csvFileName} currentRecordCount={recipients.length} />
+                <CSVUploader onDataParsed={handleCSVDataParsed} onManualRecipients={handleManualRecipients} currentFileName={csvFileName} currentRecordCount={recipients.length} />
               </div>
               <div className="bg-[#0F0F10] border border-white/10 rounded-2xl p-6 text-left space-y-4">
                 <h4 className="font-semibold text-white text-sm font-serif italic">CSV Format</h4>
