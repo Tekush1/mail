@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SMTPConfig, Recipient, EmailTemplate, AttachmentFile, LogMessage } from './types';
 import SMTPConfigurator from './components/SMTPConfigurator';
 import CSVUploader from './components/CSVUploader';
@@ -8,8 +8,8 @@ import LoginScreen from './components/LoginScreen';
 import TemplateManager from './components/TemplateManager';
 import CampaignHistory from './components/CampaignHistory';
 import {
-  Settings, FileSpreadsheet, Mail, Play, Sparkles, ChevronRight,
-  Database, ArrowRight, History, BookOpen, LogOut, X,
+  FileSpreadsheet, Mail, Play, Sparkles, ChevronRight,
+  Database, Settings, History, BookOpen, LogOut, X,
 } from 'lucide-react';
 
 const INITIAL_SMTP_CONFIG: SMTPConfig = {
@@ -20,8 +20,8 @@ const INITIAL_SMTP_CONFIG: SMTPConfig = {
 };
 
 const INITIAL_TEMPLATE: EmailTemplate = {
-  subject: 'Hi {Name}, your message is here',
-  body: `Dear {Name},\n\nThank you for reaching out.\n\nWarm regards,\nTeam`,
+  subject: 'Hi {Name}, Invoice from {Company} [Ref: {Invoice}]',
+  body: `Dear {Name},\n\nThank you for your partnership with {Company}.\nPlease find details below:\n\n• Invoice: {Invoice}\n• Amount: {Amount}\n\nKindly review the attached document.\n\nWarm regards,\nAccounts Team`,
 };
 
 export default function App() {
@@ -37,23 +37,11 @@ export default function App() {
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('mailing_auth_token');
     if (saved) setAuthToken(saved);
   }, []);
-
-  // Close drawer on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (settingsOpen && drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
-        setSettingsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [settingsOpen]);
 
   const addLog = (text: string, type: 'info' | 'success' | 'error' = 'info') => {
     setLogs((prev) => [
@@ -78,6 +66,15 @@ export default function App() {
     setRecipients(mapped);
     addLog(`📊 Loaded "${data.fileName}" — ${mapped.length} contacts`, 'info');
     setActiveTab('email');
+  };
+
+  const handleManualRecipients = (newRecipients: Recipient[]) => {
+    setRecipients(newRecipients);
+    setCsvFileName('Manual Entry');
+    setEmailFieldName('Email');
+    setNameFieldName('Name');
+    setCsvHeaders(['Email', 'Name']);
+    addLog(`✏️ ${newRecipients.length} recipients added manually`, 'info');
   };
 
   const handleResetRecipientStatuses = () => {
@@ -118,17 +115,18 @@ export default function App() {
       {/* Settings Drawer Overlay */}
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex">
-          {/* Backdrop */}
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
-          {/* Drawer */}
-          <div ref={drawerRef} className="relative ml-auto h-full w-full max-w-xl bg-[#0D0D0E] border-l border-white/10 flex flex-col shadow-2xl overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 sticky top-0 bg-[#0D0D0E] z-10">
+          <div className="relative ml-auto w-full max-w-2xl bg-[#0D0D0E] border-l border-white/10 h-full overflow-y-auto shadow-2xl flex flex-col">
+            <div className="sticky top-0 bg-[#0D0D0E] border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-amber-500" />
-                <span className="font-semibold text-white text-sm">SMTP Settings</span>
+                <span className="text-sm font-semibold text-white">SMTP Settings</span>
               </div>
-              <button type="button" onClick={() => setSettingsOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all cursor-pointer"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -159,22 +157,24 @@ export default function App() {
           <div className="flex items-center flex-wrap gap-2 text-xs font-semibold">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 text-gray-300 rounded-xl border border-white/10">
               <Database className="w-3.5 h-3.5 text-gray-500" />
-              <span>{recipients.length > 0 ? `${recipients.length} Contacts` : 'No list loaded'}</span>
+              <span>{recipients.length > 0 ? `${recipients.length} Contacts` : 'No contacts'}</span>
             </div>
-            {/* Settings button — opens SMTP drawer */}
-            <button type="button" onClick={() => setSettingsOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 hover:bg-amber-500/20 transition-all">
-              <Settings className="w-3.5 h-3.5" />
-              <span>{smtpConfig.isSimulation ? 'Simulator' : smtpConfig.host}</span>
-            </button>
             {sentCount > 0 && (
               <div className="px-2.5 py-1.5 bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 rounded-xl">✓ {sentCount}</div>
             )}
             {failedCount > 0 && (
               <div className="px-2.5 py-1.5 bg-rose-950/40 text-rose-400 border border-rose-500/20 rounded-xl">✗ {failedCount}</div>
             )}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-amber-400 hover:border-amber-500/30 rounded-xl transition-all cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>{smtpConfig.isSimulation ? 'Simulator' : smtpConfig.host.split('.')[1] || 'SMTP'}</span>
+            </button>
             <button type="button" onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-rose-400 hover:border-rose-500/30 rounded-xl transition-all">
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-rose-400 hover:border-rose-500/30 rounded-xl transition-all cursor-pointer">
               <LogOut className="w-3.5 h-3.5" /> Logout
             </button>
           </div>
@@ -182,7 +182,6 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
-        {/* Tabs */}
         <div className="flex border-b border-white/10 gap-1 overflow-x-auto scrollbar-none">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button key={id} type="button" onClick={() => setActiveTab(id)}
@@ -196,27 +195,29 @@ export default function App() {
           ))}
         </div>
 
-        {/* Tab Panels */}
         <div className="min-h-[450px]">
           {activeTab === 'csv' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-2">
-                <CSVUploader onDataParsed={handleCSVDataParsed} currentFileName={csvFileName} currentRecordCount={recipients.length} />
+                <CSVUploader
+                  onDataParsed={handleCSVDataParsed}
+                  onManualRecipients={handleManualRecipients}
+                  currentFileName={csvFileName}
+                  currentRecordCount={recipients.length}
+                />
               </div>
               <div className="bg-[#0F0F10] border border-white/10 rounded-2xl p-6 text-left space-y-4">
                 <h4 className="font-semibold text-white text-sm font-serif italic">CSV Format</h4>
                 <div className="text-xs text-gray-400 space-y-3">
-                  <p>First row mein column headers hone chahiye. Example: <strong>Email, Name, Company</strong></p>
+                  <p>First row mein column headers hone chahiye. Example: <strong>Email, Name, Company, Invoice</strong></p>
                   <div className="p-3 bg-white/5 border border-white/10 rounded-xl font-mono text-[10px] space-y-1">
                     <p className="text-gray-300">Email,Name,Company</p>
                     <p className="text-gray-500">user@gmail.com,Rahul,ACME</p>
                   </div>
-                  <p className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
-                    Ya manual mode mein directly emails type karo — CSV ki zaroorat nahi.
-                  </p>
+                  <p className="text-gray-500">Ya manually email addresses type karo — CSV zaroori nahi hai.</p>
                   <button type="button" onClick={() => setActiveTab('email')}
                     className="flex items-center gap-1.5 text-amber-500 font-bold hover:text-amber-400 transition-all pt-1">
-                    Template Edit → <ArrowRight className="w-3.5 h-3.5" />
+                    Template Edit → <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
