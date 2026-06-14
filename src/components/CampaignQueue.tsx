@@ -264,8 +264,9 @@ export default function CampaignQueue({
                 </button>
               ) : (
                 <button type="button" onClick={handleStartResume}
-                  className="flex items-center gap-1.5 px-5 py-3 rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/15 shadow-md transition-all cursor-pointer">
-                  <Play className="w-3.5 h-3.5 fill-current" /> Start
+                  disabled={recipients.length === 0}
+                  className="flex items-center gap-1.5 px-5 py-3 rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-black shadow-amber-500/15 shadow-md transition-all cursor-pointer">
+                  <Play className="w-3.5 h-3.5 fill-current" /> {recipients.length === 0 ? 'CSV Upload Karo' : 'Start'}
                 </button>
               )}
               <button type="button" onClick={handleHardReset}

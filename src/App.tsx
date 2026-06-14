@@ -12,13 +12,7 @@ import {
   Database, ArrowRight, Compass, History, BookOpen, LogOut,
 } from 'lucide-react';
 
-const INITIAL_SIMULATION_CONTACTS: Recipient[] = [
-  { id: '1', email: 'rahul.sharma@gmail.com', row: { Name: 'Rahul Sharma', Company: 'Bharat AgriTech', Invoice: 'INV-9602', Amount: '₹12,450' }, status: 'idle' },
-  { id: '2', email: 'priya.nair@hotmail.com', row: { Name: 'Priya Nair', Company: 'South Design Labs', Invoice: 'INV-9611', Amount: '₹8,900' }, status: 'idle' },
-  { id: '3', email: 'amit.dwivedi@yahoo.com', row: { Name: 'Amit Dwivedi', Company: 'KD Enterprises', Invoice: 'INV-9654', Amount: '₹24,100' }, status: 'idle' },
-  { id: '4', email: 'sneha.patel@gmail.com', row: { Name: 'Sneha Patel', Company: 'Nuvoco Plastics', Invoice: 'INV-9677', Amount: '₹4,200' }, status: 'idle' },
-  { id: '5', email: 'kunal.arora@outlook.com', row: { Name: 'Kunal Arora', Company: 'Arora Solutions', Invoice: 'INV-9689', Amount: '₹18,150' }, status: 'idle' },
-];
+
 
 const INITIAL_SMTP_CONFIG: SMTPConfig = {
   host: 'smtp.simulator.auto', port: '587', secure: false,
@@ -36,9 +30,9 @@ export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'smtp' | 'csv' | 'email' | 'queue' | 'history'>('smtp');
   const [smtpConfig, setSmtpConfig] = useState<SMTPConfig>(INITIAL_SMTP_CONFIG);
-  const [csvFileName, setCsvFileName] = useState('preloaded_sample.csv');
-  const [recipients, setRecipients] = useState<Recipient[]>(INITIAL_SIMULATION_CONTACTS);
-  const [csvHeaders, setCsvHeaders] = useState<string[]>(['Name', 'Company', 'Invoice', 'Amount']);
+  const [csvFileName, setCsvFileName] = useState('');
+  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [emailFieldName, setEmailFieldName] = useState('Email');
   const [nameFieldName, setNameFieldName] = useState('Name');
   const [template, setTemplate] = useState<EmailTemplate>(INITIAL_TEMPLATE);
@@ -133,7 +127,7 @@ export default function App() {
           <div className="flex items-center flex-wrap gap-2 text-xs font-semibold">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 text-gray-300 rounded-xl border border-white/10">
               <Database className="w-3.5 h-3.5 text-gray-500" />
-              <span>{recipients.length} Contacts</span>
+              <span>{recipients.length > 0 ? `${recipients.length} Contacts` : 'No CSV loaded'}</span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
               <Settings className="w-3.5 h-3.5" />
