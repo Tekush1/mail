@@ -193,17 +193,51 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
   let activeSlot = '';
 
   if (useAutoRotation) {
-    // Auto-rotation mode: pick account from env
     const active = getActiveSmtpConfig();
     if (!active) {
-      return res.status(429).json({ success: false, message: 'All SMTP accounts exhausted for today. Reset counters or add more accounts.' });
+      return res.status(429).json({ success: false, message: 'All SMTP accounts exhausted. Reset counters or add more accounts.' });
     }
     smtpConfig = active.config;
     activeSlot = active.slot;
   } else {
-    // Manual mode: user provided credentials from UI
     smtpConfig = manualSmtpConfig;
     activeSlot = 'manual';
+  }
+
+  // Use Resend HTTP API instead of SMTP (Railway blocks outbound SMTP)
+  if (activeSlot.startsWith('resend') && smtpConfig.pass) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${smtpConfig.pass}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: smtpConfig.senderName
+            ? `${smtpConfig.senderName} <${smtpConfig.senderEmail}>`
+            : smtpConfig.senderEmail,
+          to: [emailData.to],
+          subject: emailData.subject,
+          html: emailData.body,
+        }),
+      });
+      const data = await response.json() as any;
+      if (!response.ok) {
+        return res.status(500).json({ success: false, message: data.message || 'Resend API error' });
+      }
+      if (useAutoRotation && activeSlot !== 'manual') sessionCounters[activeSlot]++;
+      return res.json({
+        success: true,
+        messageId: data.id,
+        message: `Sent to ${emailData.to}`,
+        smtpAccount: SMTP_ACCOUNTS[activeSlot as SlotKey]?.label,
+        currentSlot,
+        counters: { ...sessionCounters },
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
   }
 
   const transporter = nodemailer.createTransport({
