@@ -42,23 +42,23 @@ const SMTP_ACCOUNTS = {
     limit: 300,
   },
   brevo1: {
-    host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false,
+    host: 'api.brevo.com',
+    port: 443,
+    secure: true,
     user: process.env.BREVO_SMTP_USER_1 || '',
-    pass: process.env.BREVO_SMTP_KEY_1 || '',
-    senderEmail: process.env.BREVO_SMTP_USER_1 || '',
+    pass: process.env.BREVO_API_KEY_1 || process.env.BREVO_SMTP_KEY_1 || '',
+    senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.BREVO_SMTP_USER_1 || '',
     senderName: process.env.RESEND_SENDER_NAME || '',
     label: 'Brevo Account 1',
     limit: 300,
   },
   brevo2: {
-    host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false,
+    host: 'api.brevo.com',
+    port: 443,
+    secure: true,
     user: process.env.BREVO_SMTP_USER_2 || '',
-    pass: process.env.BREVO_SMTP_KEY_2 || '',
-    senderEmail: process.env.BREVO_SMTP_USER_2 || '',
+    pass: process.env.BREVO_API_KEY_2 || process.env.BREVO_SMTP_KEY_2 || '',
+    senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.BREVO_SMTP_USER_2 || '',
     senderName: process.env.RESEND_SENDER_NAME || '',
     label: 'Brevo Account 2',
     limit: 300,
@@ -204,40 +204,58 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     activeSlot = 'manual';
   }
 
-  // Use Resend HTTP API instead of SMTP (Railway blocks outbound SMTP)
-  if (activeSlot.startsWith('resend') && smtpConfig.pass) {
-    try {
+  // Use HTTP APIs (Railway blocks outbound SMTP ports)
+  const sendViaApi = async (): Promise<{ success: boolean; messageId?: string; message: string }> => {
+    // Resend HTTP API
+    if (activeSlot.startsWith('resend') && smtpConfig.pass) {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${smtpConfig.pass}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${smtpConfig.pass}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: smtpConfig.senderName
-            ? `${smtpConfig.senderName} <${smtpConfig.senderEmail}>`
-            : smtpConfig.senderEmail,
+          from: smtpConfig.senderName ? `${smtpConfig.senderName} <${smtpConfig.senderEmail}>` : smtpConfig.senderEmail,
           to: [emailData.to],
           subject: emailData.subject,
           html: emailData.body,
         }),
       });
       const data = await response.json() as any;
-      if (!response.ok) {
-        return res.status(500).json({ success: false, message: data.message || 'Resend API error' });
-      }
-      if (useAutoRotation && activeSlot !== 'manual') sessionCounters[activeSlot]++;
-      return res.json({
-        success: true,
-        messageId: data.id,
-        message: `Sent to ${emailData.to}`,
-        smtpAccount: SMTP_ACCOUNTS[activeSlot as SlotKey]?.label,
-        currentSlot,
-        counters: { ...sessionCounters },
-      });
-    } catch (error: any) {
-      return res.status(500).json({ success: false, message: error.message });
+      if (!response.ok) throw new Error(data.message || 'Resend API error');
+      return { success: true, messageId: data.id, message: `Sent to ${emailData.to}` };
     }
+
+    // Brevo HTTP API
+    if (activeSlot.startsWith('brevo') && smtpConfig.pass) {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': smtpConfig.pass, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: { name: smtpConfig.senderName || 'Campaign', email: smtpConfig.senderEmail },
+          to: [{ email: emailData.to }],
+          subject: emailData.subject,
+          htmlContent: emailData.body,
+        }),
+      });
+      const data = await response.json() as any;
+      if (!response.ok) throw new Error(data.message || 'Brevo API error');
+      return { success: true, messageId: data.messageId, message: `Sent to ${emailData.to}` };
+    }
+
+    throw new Error('No valid API config found');
+  };
+
+  try {
+    const result = await sendViaApi();
+    if (useAutoRotation && activeSlot !== 'manual') sessionCounters[activeSlot]++;
+    return res.json({
+      success: true,
+      messageId: result.messageId,
+      message: result.message,
+      smtpAccount: SMTP_ACCOUNTS[activeSlot as SlotKey]?.label || activeSlot,
+      currentSlot,
+      counters: { ...sessionCounters },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 
   const transporter = nodemailer.createTransport({
