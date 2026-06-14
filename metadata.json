@@ -1,0 +1,6 @@
+{
+  "name": "Bulk Mailing System",
+  "description": "A powerful batch mailing system supporting CSV recipient uploads, dynamic field personalization, attachment uploads (PDFs and images), and real-time SMTP and simulation sending queues.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
