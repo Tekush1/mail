@@ -74,7 +74,7 @@ const sessionCounters: Record<string, number> = {
 };
 
 type SlotKey = keyof typeof SMTP_ACCOUNTS;
-let currentSlot: SlotKey = 'resend1';
+let currentSlot: SlotKey = 'brevo1';
 
 function getNextAvailableSlot(): SlotKey | null {
   const slots: SlotKey[] = ['resend1', 'resend2', 'brevo1', 'brevo2'];
