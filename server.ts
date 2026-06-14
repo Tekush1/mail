@@ -1,12 +1,10 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
-import { createClient } from '@supabase/supabase-js';
 
 dotenv.config({ path: '.env.local' });
-dotenv.config(); // fallback to .env
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,94 +13,83 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // ============================================
-// SMTP ACCOUNT ROTATION CONFIG
-// Loaded from env - never exposed to frontend
+// ACCOUNT CONFIG — Brevo first, Resend fallback
 // ============================================
 const SMTP_ACCOUNTS = {
-  resend1: {
-    host: 'smtp.resend.com',
-    port: 587,
-    secure: false,
-    user: 'resend',
-    pass: process.env.RESEND_API_KEY_1 || '',
-    senderEmail: process.env.RESEND_SENDER_EMAIL || '',
-    senderName: process.env.RESEND_SENDER_NAME || '',
-    label: 'Resend Account 1',
-    limit: 300,
-  },
-  resend2: {
-    host: 'smtp.resend.com',
-    port: 587,
-    secure: false,
-    user: 'resend',
-    pass: process.env.RESEND_API_KEY_2 || '',
-    senderEmail: process.env.RESEND_SENDER_EMAIL || '',
-    senderName: process.env.RESEND_SENDER_NAME || '',
-    label: 'Resend Account 2',
-    limit: 300,
-  },
   brevo1: {
-    host: 'api.brevo.com',
-    port: 443,
-    secure: true,
-    user: process.env.BREVO_SMTP_USER_1 || '',
     pass: process.env.BREVO_API_KEY_1 || process.env.BREVO_SMTP_KEY_1 || '',
-    senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.BREVO_SMTP_USER_1 || '',
-    senderName: process.env.RESEND_SENDER_NAME || '',
+    senderEmail: process.env.BREVO_SENDER_EMAIL || '',
+    senderName: process.env.SENDER_NAME || 'Campaign',
     label: 'Brevo Account 1',
     limit: 300,
+    type: 'brevo',
   },
   brevo2: {
-    host: 'api.brevo.com',
-    port: 443,
-    secure: true,
-    user: process.env.BREVO_SMTP_USER_2 || '',
     pass: process.env.BREVO_API_KEY_2 || process.env.BREVO_SMTP_KEY_2 || '',
-    senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.BREVO_SMTP_USER_2 || '',
-    senderName: process.env.RESEND_SENDER_NAME || '',
+    senderEmail: process.env.BREVO_SENDER_EMAIL_2 || process.env.BREVO_SENDER_EMAIL || '',
+    senderName: process.env.SENDER_NAME || 'Campaign',
     label: 'Brevo Account 2',
     limit: 300,
+    type: 'brevo',
+  },
+  resend1: {
+    pass: process.env.RESEND_API_KEY_1 || '',
+    senderEmail: process.env.RESEND_SENDER_EMAIL || '',
+    senderName: process.env.SENDER_NAME || 'Campaign',
+    label: 'Resend Account 1',
+    limit: 300,
+    type: 'resend',
+  },
+  resend2: {
+    pass: process.env.RESEND_API_KEY_2 || '',
+    senderEmail: process.env.RESEND_SENDER_EMAIL || '',
+    senderName: process.env.SENDER_NAME || 'Campaign',
+    label: 'Resend Account 2',
+    limit: 300,
+    type: 'resend',
   },
 };
 
-// Per-session counters (reset on server restart)
 const sessionCounters: Record<string, number> = {
-  resend1: 0,
-  resend2: 0,
   brevo1: 0,
   brevo2: 0,
+  resend1: 0,
+  resend2: 0,
 };
 
 type SlotKey = keyof typeof SMTP_ACCOUNTS;
-let currentSlot: SlotKey = 'brevo1';
+
+// Always start with first account that has a key set
+function getInitialSlot(): SlotKey {
+  const order: SlotKey[] = ['brevo1', 'brevo2', 'resend1', 'resend2'];
+  const found = order.find((s) => !!SMTP_ACCOUNTS[s].pass);
+  console.log(`[SMTP] Initial slot: ${found || 'NONE — no keys found!'}`);
+  return found || 'brevo1';
+}
+
+let currentSlot: SlotKey = getInitialSlot();
 
 function getNextAvailableSlot(): SlotKey | null {
-  const slots: SlotKey[] = ['resend1', 'resend2', 'brevo1', 'brevo2'];
-  for (const slot of slots) {
-    const acc = SMTP_ACCOUNTS[slot];
-    if (acc.pass && sessionCounters[slot] < acc.limit) {
-      return slot;
-    }
-  }
-  return null;
+  const slots: SlotKey[] = ['brevo1', 'brevo2', 'resend1', 'resend2'];
+  return slots.find((s) => SMTP_ACCOUNTS[s].pass && sessionCounters[s] < SMTP_ACCOUNTS[s].limit) || null;
 }
 
 function getActiveSmtpConfig() {
-  // Check if current slot still has quota
-  if (sessionCounters[currentSlot] >= SMTP_ACCOUNTS[currentSlot].limit) {
+  const acc = SMTP_ACCOUNTS[currentSlot];
+  if (!acc.pass || sessionCounters[currentSlot] >= acc.limit) {
     const next = getNextAvailableSlot();
     if (next) {
       currentSlot = next;
       console.log(`[SMTP] Rotated to ${SMTP_ACCOUNTS[currentSlot].label}`);
     } else {
-      return null; // All accounts exhausted
+      return null;
     }
   }
   return { slot: currentSlot, config: SMTP_ACCOUNTS[currentSlot] };
 }
 
 // ============================================
-// AUTH — Simple password protection
+// AUTH
 // ============================================
 const APP_PASSWORD = process.env.APP_PASSWORD || 'changeme123';
 
@@ -115,11 +102,9 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// Simple auth middleware
 function requireAuth(req: any, res: any, next: any) {
   const token = req.headers['x-auth-token'];
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
-  // Token is base64 of "auth:timestamp" - simple stateless check
   try {
     const decoded = Buffer.from(token as string, 'base64').toString('utf8');
     if (decoded.startsWith('auth:')) return next();
@@ -128,10 +113,10 @@ function requireAuth(req: any, res: any, next: any) {
 }
 
 // ============================================
-// SMTP STATUS — Which account is active
+// SMTP STATUS
 // ============================================
 app.get('/api/smtp/status', requireAuth, (req, res) => {
-  const slots = ['resend1', 'resend2', 'brevo1', 'brevo2'] as SlotKey[];
+  const slots = ['brevo1', 'brevo2', 'resend1', 'resend2'] as SlotKey[];
   const status = slots.map((slot) => ({
     slot,
     label: SMTP_ACCOUNTS[slot].label,
@@ -145,32 +130,97 @@ app.get('/api/smtp/status', requireAuth, (req, res) => {
 
 app.post('/api/smtp/reset-counters', requireAuth, (req, res) => {
   Object.keys(sessionCounters).forEach((k) => (sessionCounters[k] = 0));
-  currentSlot = 'resend1';
+  currentSlot = getInitialSlot();
   res.json({ success: true, message: 'Counters reset' });
 });
 
 // ============================================
-// TEST SMTP
+// DEBUG ENDPOINT — check what keys are loaded
 // ============================================
-app.post('/api/test-smtp', requireAuth, async (req, res) => {
-  const { host, port, secure, user, pass, senderEmail } = req.body;
-  if (!host || !port || !user || !pass) {
-    return res.status(400).json({ success: false, message: 'Missing SMTP fields.' });
-  }
-  const transporter = nodemailer.createTransport({
-    host, port: Number(port), secure: secure === true,
-    auth: { user, pass }, timeout: 10000,
-  } as any);
-  try {
-    await transporter.verify();
-    res.json({ success: true, message: 'SMTP connection verified!' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+app.get('/api/debug/config', requireAuth, (req, res) => {
+  res.json({
+    currentSlot,
+    accounts: Object.fromEntries(
+      Object.entries(SMTP_ACCOUNTS).map(([k, v]) => [
+        k,
+        {
+          hasKey: !!v.pass,
+          keyPreview: v.pass ? v.pass.substring(0, 8) + '...' : 'NOT SET',
+          senderEmail: v.senderEmail || 'NOT SET',
+          type: v.type,
+        },
+      ])
+    ),
+    envKeys: {
+      BREVO_API_KEY_1: process.env.BREVO_API_KEY_1 ? process.env.BREVO_API_KEY_1.substring(0, 8) + '...' : 'NOT SET',
+      BREVO_SMTP_KEY_1: process.env.BREVO_SMTP_KEY_1 ? process.env.BREVO_SMTP_KEY_1.substring(0, 8) + '...' : 'NOT SET',
+      BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL || 'NOT SET',
+      SENDER_NAME: process.env.SENDER_NAME || 'NOT SET',
+      RESEND_API_KEY_1: process.env.RESEND_API_KEY_1 ? process.env.RESEND_API_KEY_1.substring(0, 8) + '...' : 'NOT SET',
+    },
+  });
 });
 
 // ============================================
-// SEND EMAIL — with auto account rotation
+// SEND — Brevo HTTP API
+// ============================================
+async function sendViaBrevo(config: any, emailData: any) {
+  if (!config.pass) throw new Error('Brevo API key not set (BREVO_API_KEY_1 or BREVO_SMTP_KEY_1)');
+  if (!config.senderEmail) throw new Error('Brevo sender email not set (BREVO_SENDER_EMAIL)');
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': config.pass,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: config.senderName || 'Campaign', email: config.senderEmail },
+      to: [{ email: emailData.to }],
+      subject: emailData.subject,
+      htmlContent: emailData.body,
+      ...(emailData.attachments?.length > 0 && {
+        attachment: emailData.attachments.map((att: any) => ({
+          name: att.name,
+          content: att.content.split(';base64,').pop(),
+        })),
+      }),
+    }),
+  });
+
+  const data = await response.json() as any;
+  if (!response.ok) throw new Error(data.message || `Brevo error ${response.status}: ${JSON.stringify(data)}`);
+  return { messageId: data.messageId };
+}
+
+// ============================================
+// SEND — Resend HTTP API
+// ============================================
+async function sendViaResend(config: any, emailData: any) {
+  if (!config.pass) throw new Error('Resend API key not set (RESEND_API_KEY_1)');
+  if (!config.senderEmail) throw new Error('Resend sender email not set (RESEND_SENDER_EMAIL)');
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${config.pass}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: config.senderName ? `${config.senderName} <${config.senderEmail}>` : config.senderEmail,
+      to: [emailData.to],
+      subject: emailData.subject,
+      html: emailData.body,
+    }),
+  });
+
+  const data = await response.json() as any;
+  if (!response.ok) throw new Error(data.message || `Resend error ${response.status}: ${JSON.stringify(data)}`);
+  return { messageId: data.id };
+}
+
+// ============================================
+// SEND EMAIL ENDPOINT
 // ============================================
 app.post('/api/send-email', requireAuth, async (req, res) => {
   const { emailData, useAutoRotation, manualSmtpConfig } = req.body;
@@ -189,114 +239,69 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     return res.json({ success: true, simulated: true, message: `Simulated send to ${emailData.to}` });
   }
 
+  // Get active config
   let smtpConfig: any;
   let activeSlot = '';
 
   if (useAutoRotation) {
     const active = getActiveSmtpConfig();
     if (!active) {
-      return res.status(429).json({ success: false, message: 'All SMTP accounts exhausted. Reset counters or add more accounts.' });
+      return res.status(429).json({ success: false, message: 'All accounts exhausted. Reset counters.' });
     }
     smtpConfig = active.config;
     activeSlot = active.slot;
   } else {
-    smtpConfig = manualSmtpConfig;
-    activeSlot = 'manual';
+    // Manual mode — try to use server-side brevo config anyway
+    const active = getActiveSmtpConfig();
+    if (active) {
+      smtpConfig = active.config;
+      activeSlot = active.slot;
+    } else {
+      return res.status(500).json({ success: false, message: 'No accounts configured. Check env variables.' });
+    }
   }
 
-  // Use HTTP APIs (Railway blocks outbound SMTP ports)
-  const sendViaApi = async (): Promise<{ success: boolean; messageId?: string; message: string }> => {
-    // Resend HTTP API
-    if (activeSlot.startsWith('resend') && smtpConfig.pass) {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${smtpConfig.pass}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: smtpConfig.senderName ? `${smtpConfig.senderName} <${smtpConfig.senderEmail}>` : smtpConfig.senderEmail,
-          to: [emailData.to],
-          subject: emailData.subject,
-          html: emailData.body,
-        }),
-      });
-      const data = await response.json() as any;
-      if (!response.ok) throw new Error(data.message || 'Resend API error');
-      return { success: true, messageId: data.id, message: `Sent to ${emailData.to}` };
-    }
+  const accountType = SMTP_ACCOUNTS[activeSlot as SlotKey]?.type || 'brevo';
 
-    // Brevo HTTP API
-    if (activeSlot.startsWith('brevo') && smtpConfig.pass) {
-      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: { 'api-key': smtpConfig.pass, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sender: { name: smtpConfig.senderName || 'Campaign', email: smtpConfig.senderEmail },
-          to: [{ email: emailData.to }],
-          subject: emailData.subject,
-          htmlContent: emailData.body,
-        }),
-      });
-      const data = await response.json() as any;
-      if (!response.ok) throw new Error(data.message || 'Brevo API error');
-      return { success: true, messageId: data.messageId, message: `Sent to ${emailData.to}` };
-    }
-
-    throw new Error('No valid API config found');
+  const trySend = async (slot: SlotKey): Promise<{ messageId?: string }> => {
+    const cfg = SMTP_ACCOUNTS[slot];
+    if (cfg.type === 'brevo') return sendViaBrevo(cfg, emailData);
+    return sendViaResend(cfg, emailData);
   };
 
   try {
-    const result = await sendViaApi();
-    if (useAutoRotation && activeSlot !== 'manual') sessionCounters[activeSlot]++;
+    let result: { messageId?: string };
+    let usedSlot = activeSlot as SlotKey;
+
+    try {
+      result = await trySend(activeSlot as SlotKey);
+    } catch (primaryErr: any) {
+      console.warn(`[SMTP] ${SMTP_ACCOUNTS[activeSlot as SlotKey]?.label} failed: ${primaryErr.message}`);
+      // Try next available slot as fallback
+      const fallbackSlot = (['brevo1', 'brevo2', 'resend1', 'resend2'] as SlotKey[]).find(
+        (s) => s !== activeSlot && SMTP_ACCOUNTS[s].pass && sessionCounters[s] < SMTP_ACCOUNTS[s].limit
+      );
+      if (!fallbackSlot) throw new Error(`Primary failed: ${primaryErr.message}. No fallback available.`);
+      console.log(`[SMTP] Falling back to ${SMTP_ACCOUNTS[fallbackSlot].label}`);
+      result = await trySend(fallbackSlot);
+      usedSlot = fallbackSlot;
+      currentSlot = fallbackSlot;
+    }
+
+    sessionCounters[usedSlot]++;
+    console.log(`[SMTP] ✅ Sent to ${emailData.to} via ${SMTP_ACCOUNTS[usedSlot].label} (${sessionCounters[usedSlot]}/${SMTP_ACCOUNTS[usedSlot].limit})`);
+
     return res.json({
       success: true,
       messageId: result.messageId,
-      message: result.message,
-      smtpAccount: SMTP_ACCOUNTS[activeSlot as SlotKey]?.label || activeSlot,
+      message: `Sent to ${emailData.to}`,
+      smtpAccount: SMTP_ACCOUNTS[usedSlot].label,
       currentSlot,
       counters: { ...sessionCounters },
     });
   } catch (error: any) {
+    console.error(`[SMTP] ❌ All attempts failed for ${emailData.to}:`, error.message);
     return res.status(500).json({ success: false, message: error.message });
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: smtpConfig.host,
-    port: Number(smtpConfig.port),
-    secure: smtpConfig.secure === true,
-    auth: { user: smtpConfig.user, pass: smtpConfig.pass },
-  } as any);
-
-  const attachments = (emailData.attachments || []).map((att: any) => {
-    const base64Data = att.content.split(';base64,').pop();
-    return { filename: att.name, content: Buffer.from(base64Data, 'base64'), contentType: att.type };
-  });
-
-  const mailOptions = {
-    from: smtpConfig.senderName
-      ? `"${smtpConfig.senderName}" <${smtpConfig.senderEmail || smtpConfig.user}>`
-      : smtpConfig.senderEmail || smtpConfig.user,
-    to: emailData.to,
-    subject: emailData.subject,
-    html: emailData.body,
-    attachments,
-  };
-
-  try {
-    const info = await transporter.sendMail(mailOptions);
-    // Increment counter
-    if (useAutoRotation && activeSlot !== 'manual') {
-      sessionCounters[activeSlot]++;
-    }
-    res.json({
-      success: true,
-      messageId: info.messageId,
-      message: `Sent to ${emailData.to}`,
-      smtpAccount: useAutoRotation ? SMTP_ACCOUNTS[activeSlot as SlotKey]?.label : 'Manual SMTP',
-      currentSlot: useAutoRotation ? currentSlot : 'manual',
-      counters: useAutoRotation ? { ...sessionCounters } : null,
-    });
-  } catch (error: any) {
-    console.error('SMTP send error:', error);
-    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -315,7 +320,12 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Bulk Mailing System running at http://localhost:${PORT}`);
     console.log(`🔐 Auth: password protected`);
-    console.log(`📧 SMTP Rotation: Resend1 → Resend2 → Brevo1 → Brevo2`);
+    const configured = Object.entries(SMTP_ACCOUNTS)
+      .filter(([, v]) => v.pass)
+      .map(([k, v]) => `${v.label} [${v.senderEmail || 'NO SENDER EMAIL'}]`)
+      .join(', ');
+    console.log(`📧 Configured: ${configured || '❌ NONE — check Railway env variables!'}`);
+    console.log(`📤 Starting slot: ${SMTP_ACCOUNTS[currentSlot].label}`);
   });
 }
 
