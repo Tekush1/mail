@@ -90,11 +90,8 @@ export default function CampaignQueue({
 
     if (!useAutoRotation) {
       payload.manualSmtpConfig = smtpConfig;
-    } else if (smtpConfig.isSimulation) {
-      // Even in auto mode, allow simulation
-      payload.useAutoRotation = false;
-      payload.manualSmtpConfig = smtpConfig;
     }
+    // When useAutoRotation is true, server uses env keys — no manualSmtpConfig needed
 
     try {
       const res = await fetch('/api/send-email', {
