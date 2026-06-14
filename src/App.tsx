@@ -8,11 +8,9 @@ import LoginScreen from './components/LoginScreen';
 import TemplateManager from './components/TemplateManager';
 import CampaignHistory from './components/CampaignHistory';
 import {
-  Settings, FileSpreadsheet, Mail, Play, Sparkles, ChevronRight,
-  Database, ArrowRight, Compass, History, BookOpen, LogOut,
+  FileSpreadsheet, Mail, Play, Sparkles, ChevronRight,
+  Database, Settings, History, BookOpen, LogOut, X,
 } from 'lucide-react';
-
-
 
 const INITIAL_SMTP_CONFIG: SMTPConfig = {
   host: 'smtp.simulator.auto', port: '587', secure: false,
@@ -23,12 +21,12 @@ const INITIAL_SMTP_CONFIG: SMTPConfig = {
 
 const INITIAL_TEMPLATE: EmailTemplate = {
   subject: 'Hi {Name}, Invoice from {Company} [Ref: {Invoice}]',
-  body: `Dear {Name},\n\nThank you for your partnership with {Company}.\nPlease find details below:\n\n• Invoice: {Invoice}\n• Amount: {Amount}\n\nKindly review the attached document.\n\nWarm regards,\nAccounts Team\n{Company}`,
+  body: `Dear {Name},\n\nThank you for your partnership with {Company}.\nPlease find details below:\n\n• Invoice: {Invoice}\n• Amount: {Amount}\n\nKindly review the attached document.\n\nWarm regards,\nAccounts Team`,
 };
 
 export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'smtp' | 'csv' | 'email' | 'queue' | 'history'>('smtp');
+  const [activeTab, setActiveTab] = useState<'csv' | 'email' | 'queue' | 'history'>('csv');
   const [smtpConfig, setSmtpConfig] = useState<SMTPConfig>(INITIAL_SMTP_CONFIG);
   const [csvFileName, setCsvFileName] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -38,8 +36,8 @@ export default function App() {
   const [template, setTemplate] = useState<EmailTemplate>(INITIAL_TEMPLATE);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [logs, setLogs] = useState<LogMessage[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Check saved auth token on mount
   useEffect(() => {
     const saved = localStorage.getItem('mailing_auth_token');
     if (saved) setAuthToken(saved);
@@ -70,6 +68,15 @@ export default function App() {
     setActiveTab('email');
   };
 
+  const handleManualRecipients = (newRecipients: Recipient[]) => {
+    setRecipients(newRecipients);
+    setCsvFileName('Manual Entry');
+    setEmailFieldName('Email');
+    setNameFieldName('Name');
+    setCsvHeaders(['Email', 'Name']);
+    addLog(`✏️ ${newRecipients.length} recipients added manually`, 'info');
+  };
+
   const handleResetRecipientStatuses = () => {
     setRecipients((prev) => prev.map((r) => ({ ...r, status: 'idle', errorMessage: undefined, sentAt: undefined })));
   };
@@ -92,21 +99,44 @@ export default function App() {
   const sentCount = recipients.filter((r) => r.status === 'success').length;
   const failedCount = recipients.filter((r) => r.status === 'failed').length;
 
-  // Show login if no auth
   if (!authToken) {
     return <LoginScreen onLogin={(token) => setAuthToken(token)} />;
   }
 
   const tabs = [
-    { id: 'smtp', label: '1. SMTP', icon: Settings },
-    { id: 'csv', label: '2. CSV', icon: FileSpreadsheet },
-    { id: 'email', label: '3. Template', icon: Mail },
-    { id: 'queue', label: '4. Send', icon: Play },
+    { id: 'csv', label: 'Recipients', icon: FileSpreadsheet },
+    { id: 'email', label: 'Template', icon: Mail },
+    { id: 'queue', label: 'Send', icon: Play },
     { id: 'history', label: 'History', icon: History },
   ] as const;
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-gray-200 flex flex-col font-sans">
+      {/* Settings Drawer Overlay */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
+          <div className="relative ml-auto w-full max-w-2xl bg-[#0D0D0E] border-l border-white/10 h-full overflow-y-auto shadow-2xl flex flex-col">
+            <div className="sticky top-0 bg-[#0D0D0E] border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-amber-500" />
+                <span className="text-sm font-semibold text-white">SMTP Settings</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 flex-1">
+              <SMTPConfigurator config={smtpConfig} onChange={setSmtpConfig} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-[#0D0D0E] border-b border-white/10 shrink-0 sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
@@ -127,11 +157,7 @@ export default function App() {
           <div className="flex items-center flex-wrap gap-2 text-xs font-semibold">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 text-gray-300 rounded-xl border border-white/10">
               <Database className="w-3.5 h-3.5 text-gray-500" />
-              <span>{recipients.length > 0 ? `${recipients.length} Contacts` : 'No CSV loaded'}</span>
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-              <Settings className="w-3.5 h-3.5" />
-              <span>{smtpConfig.isSimulation ? 'Simulator' : smtpConfig.host}</span>
+              <span>{recipients.length > 0 ? `${recipients.length} Contacts` : 'No contacts'}</span>
             </div>
             {sentCount > 0 && (
               <div className="px-2.5 py-1.5 bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 rounded-xl">✓ {sentCount}</div>
@@ -139,8 +165,17 @@ export default function App() {
             {failedCount > 0 && (
               <div className="px-2.5 py-1.5 bg-rose-950/40 text-rose-400 border border-rose-500/20 rounded-xl">✗ {failedCount}</div>
             )}
+            {/* Settings Button */}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-amber-400 hover:border-amber-500/30 rounded-xl transition-all cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>{smtpConfig.isSimulation ? 'Simulator' : smtpConfig.host.split('.')[1] || 'SMTP'}</span>
+            </button>
             <button type="button" onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-rose-400 hover:border-rose-500/30 rounded-xl transition-all">
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-white/10 text-gray-400 hover:text-rose-400 hover:border-rose-500/30 rounded-xl transition-all cursor-pointer">
               <LogOut className="w-3.5 h-3.5" /> Logout
             </button>
           </div>
@@ -164,31 +199,15 @@ export default function App() {
 
         {/* Tab Panels */}
         <div className="min-h-[450px]">
-          {activeTab === 'smtp' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="md:col-span-2">
-                <SMTPConfigurator config={smtpConfig} onChange={setSmtpConfig} />
-              </div>
-              <div className="bg-[#0F0F10] border border-white/10 rounded-2xl p-6 text-left space-y-4">
-                <h4 className="font-semibold text-white text-sm font-serif italic">Quick Start</h4>
-                <div className="text-xs text-gray-400 space-y-3 leading-relaxed">
-                  <p className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
-                    <strong>Auto-Rotation Mode:</strong> .env.local mein Resend/Brevo keys daalo — system khud account switch karega 300 per account.
-                  </p>
-                  <p>Gmail ke liye port 465, SSL on. App Password use karo (Google Account → Security → App Passwords).</p>
-                  <button type="button" onClick={() => setActiveTab('csv')}
-                    className="flex items-center gap-1.5 text-amber-500 font-bold hover:text-amber-400 transition-all pt-1">
-                    CSV Upload → <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'csv' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-2">
-                <CSVUploader onDataParsed={handleCSVDataParsed} currentFileName={csvFileName} currentRecordCount={recipients.length} />
+                <CSVUploader
+                  onDataParsed={handleCSVDataParsed}
+                  onManualRecipients={handleManualRecipients}
+                  currentFileName={csvFileName}
+                  currentRecordCount={recipients.length}
+                />
               </div>
               <div className="bg-[#0F0F10] border border-white/10 rounded-2xl p-6 text-left space-y-4">
                 <h4 className="font-semibold text-white text-sm font-serif italic">CSV Format</h4>
@@ -198,9 +217,10 @@ export default function App() {
                     <p className="text-gray-300">Email,Name,Company</p>
                     <p className="text-gray-500">user@gmail.com,Rahul,ACME</p>
                   </div>
+                  <p className="text-gray-500">Ya manually email addresses type karo — CSV zaroori nahi hai.</p>
                   <button type="button" onClick={() => setActiveTab('email')}
                     className="flex items-center gap-1.5 text-amber-500 font-bold hover:text-amber-400 transition-all pt-1">
-                    Template Edit → <ArrowRight className="w-3.5 h-3.5" />
+                    Template Edit → <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
