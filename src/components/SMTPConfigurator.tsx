@@ -16,6 +16,7 @@ import {
 interface SMTPConfiguratorProps {
   config: SMTPConfig;
   onChange: (config: SMTPConfig) => void;
+  authToken?: string;
 }
 
 const PRESETS = [
@@ -56,7 +57,7 @@ const PRESETS = [
   },
 ];
 
-export default function SMTPConfigurator({ config, onChange }: SMTPConfiguratorProps) {
+export default function SMTPConfigurator({ config, onChange, authToken }: SMTPConfiguratorProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -101,7 +102,7 @@ export default function SMTPConfigurator({ config, onChange }: SMTPConfiguratorP
     try {
       const response = await fetch("/api/test-smtp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-auth-token": authToken || "" },
         body: JSON.stringify({
           host: config.host,
           port: config.port,
